@@ -1,0 +1,16 @@
+node_modules/
+build/
+frontend/dist/
+frontend/node_modules/
+infinite-canvas/web/node_modules/
+infinite-canvas_old/
+infinite-canvas/.git/
+src/data/oss/
+src/data/db.sqlite
+*.db
+*.sqlite
+.env
+.env.local
+.DS_Store
+*.log
+infinite-canvas/
