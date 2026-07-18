@@ -27,11 +27,10 @@ async function ensureDb(): Promise<SqlJsDatabase> {
 
 function scheduleSave(): void {
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    if (_db) {
-      fs.writeFileSync(DB_PATH, Buffer.from(_db.export()));
-    }
-  }, 500);
+  // Write immediately instead of debouncing, so data survives process kills
+  if (_db) {
+    fs.writeFileSync(DB_PATH, Buffer.from(_db.export()));
+  }
 }
 
 // ------- Public API -------
