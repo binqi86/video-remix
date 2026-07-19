@@ -49,6 +49,13 @@
           </div>
         </t-tooltip>
 
+        <div class="nav-section-label">工具</div>
+        <t-tooltip content="拼图" placement="right">
+          <div class="nav-item" :class="{ active: isActive('/tools/tile') }" @click="navigate('/tools/tile')">
+            <t-icon name="image" size="20px" />
+          </div>
+        </t-tooltip>
+
       </div>
 
       <div class="sidebar-spacer" />

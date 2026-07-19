@@ -18,7 +18,7 @@ export const projectApi = {
 export const videoApi = {
   upload: (formData: FormData) => api.post('/video/uploadVideo', formData),
   analyze: (projectId: number) => api.post('/video/analyzeVideo', { projectId }),
-  segment: (projectId: number) => api.post('/video/segmentVideo', { projectId }),
+  segment: (projectId: number, mode: string = 'auto', fixedInterval?: number, customRanges?: string) => api.post('/video/segmentVideo', { projectId, mode, fixedInterval, customRanges }),
 }
 
 // Segment APIs

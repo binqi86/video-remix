@@ -73,12 +73,20 @@ export function exec(sql: string, params?: any[]): void {
   }
 }
 
-export async function closeDb(): Promise<void> {
+export function closeDb(): Promise<void> {
   if (saveTimer) clearTimeout(saveTimer);
   if (_db) {
     fs.writeFileSync(DB_PATH, Buffer.from(_db.export()));
     _db.close();
     _db = null;
+  }
+  return Promise.resolve();
+}
+
+/** Immediately flush the in-memory database to disk. Call this after critical writes. */
+export function syncSave(): void {
+  if (_db) {
+    fs.writeFileSync(DB_PATH, Buffer.from(_db.export()));
   }
 }
 

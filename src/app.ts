@@ -27,6 +27,7 @@ import tunnelRoutes from "./routes/tunnel/index";
 import aiRoutes from "./routes/ai/index";
 import supplierRoutes from "./routes/supplier/index";
 import appConfigRoutes from "./routes/appConfig/index";
+import toolsRoutes from "./routes/tools/index";
 import { readConfig } from "./utils/config";
 
 export default async function startServe(randomPort: boolean = false) {
@@ -72,6 +73,7 @@ export default async function startServe(randomPort: boolean = false) {
   app.use("/api/ai", aiRoutes);
   app.use("/api/supplier", supplierRoutes);
   app.use("/api/app", appConfigRoutes);
+  app.use("/api/tools", toolsRoutes);
 
   // Read port from config if not using random port
   if (!randomPort) {
@@ -140,5 +142,9 @@ export async function closeServe(): Promise<void> {
 
 // Allow direct execution
 if (require.main === module) {
+  // Graceful shutdown: save DB on exit
+  const shutdown = async () => { await closeDb(); process.exit(0); };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
   startServe().catch(console.error);
 }

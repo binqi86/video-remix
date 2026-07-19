@@ -1,4 +1,4 @@
-import { exec, db, initDatabase } from "../utils/db";
+import { exec, db, initDatabase, queryAll } from "../utils/db";
 
 export async function initDB(): Promise<void> {
   // Ensure database is initialized
@@ -17,6 +17,7 @@ export async function initDB(): Promise<void> {
       textModel TEXT DEFAULT '',
       imageModel TEXT DEFAULT '',
       videoModel TEXT DEFAULT '',
+      segmentationMode TEXT DEFAULT 'auto',
       status TEXT DEFAULT 'draft',
       createTime INTEGER NOT NULL,
       updateTime INTEGER
@@ -107,6 +108,17 @@ export async function initDB(): Promise<void> {
       models: JSON.stringify([{ name: "gpt-4o", type: "text" }, { name: "dall-e-3", type: "image" }]),
       enable: 0,
     });
+  }
+
+  // Migration: add segmentationMode column if missing
+  try {
+    const columns = queryAll("PRAGMA table_info(o_project)");
+    const hasColumn = columns.some((c: any) => c.name === "segmentationMode");
+    if (!hasColumn) {
+      exec("ALTER TABLE o_project ADD COLUMN segmentationMode TEXT DEFAULT 'auto'");
+    }
+  } catch {
+    // Migration already applied or table doesn't exist yet
   }
 
   console.log("[DB]初始化完成");

@@ -190,10 +190,6 @@ function addSupplier() {
 
 function toggleSupplier(s: any) {
   s.enabled = !s.enabled
-  if (s.enabled) {
-    // Only one supplier can be active at a time
-    suppliers.value.forEach((other: any) => { if (other !== s) other.enabled = false })
-  }
   fetch('/api/supplier/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suppliers: suppliers.value }) })
     .then(r => r.json()).then(d => { if (!d.success) MessagePlugin.error('保存失败') })
     .catch(() => MessagePlugin.error('保存失败'))

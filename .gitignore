@@ -14,3 +14,4 @@ src/data/db.sqlite
 .DS_Store
 *.log
 infinite-canvas/
+src/data/suppliers.backup.json

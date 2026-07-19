@@ -117,7 +117,7 @@ async function pollTask(targetBase: string, taskId: string, authHeader: string |
   const taskUrl = `${base}/v1/tasks/${taskId}`;
   console.log(`[Poll] 轮询: ${taskUrl}`);
   while (Date.now() - startTime < maxWait) {
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 5000));
     try {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       if (elapsed > 0 && elapsed % 30 === 0) {
@@ -141,6 +141,9 @@ function toOpenAIFormat(taskResult: any, prompt: string): any {
   const images = taskResult.result?.images || [];
   return { created: Math.floor(Date.now() / 1000), data: images.map((img: any) => ({ url: Array.isArray(img.url) ? img.url[0] : img.url })) };
 }
+
+// Cache for completed video tasks (avoids re-polling on GET)
+const videoTaskCache = new Map<string, any>();
 
 // ---- Routes ----
 
@@ -220,6 +223,9 @@ router.all(["/proxy", "/proxy/*"], async (req: Request, res: Response) => {
       const taskMatch = subPath.match(/^\/v1\/contents\/generations\/tasks\/(.+)$/);
       if (taskMatch && supplier?.endpointMappings?.length) {
         const taskId = taskMatch[1];
+        // Check cache first (from POST polling)
+        const cached = videoTaskCache.get(taskId);
+        if (cached) return res.json(cached);
         console.log(`[AI Proxy][${reqId}] 视频任务状态查询: ${taskId} (${supplier.name})`);
 
         // Build task URL with /v1 dedup for /api/v3 base URLs
@@ -333,6 +339,10 @@ router.all(["/proxy", "/proxy/*"], async (req: Request, res: Response) => {
 
       const text = await fetchRes.text();
       console.log(`[AI Proxy][${reqId}] ← ${fetchRes.status} (${Date.now() - startTime}ms, ${text.length} bytes)`);
+
+      if (fetchRes.status !== 200 && fetchRes.status !== 201) {
+        console.log(`[AI Proxy][${reqId}] ⚠️ ${text.slice(0, 300)}`);
+      }
 
       let json: any;
       try { json = JSON.parse(text); } catch {
@@ -600,11 +610,33 @@ router.all(["/proxy", "/proxy/*"], async (req: Request, res: Response) => {
 
     // Handle async task responses
     if (json.code === 200 && Array.isArray(json.data) && json.data[0]?.task_id) {
-      // For video generation (content[] converted), return task_id in Seedance format without polling
+      const taskId = json.data[0].task_id;
+      // For video generation (content[] converted), poll with supplier's timeout and cache result
       if ((req as any).__convertedBody) {
-        const taskId = json.data[0].task_id;
-        console.log(`[AI Proxy][${reqId}] 视频异步任务创建成功: ${taskId}`);
-        return res.json({ code: 0, data: { id: taskId, status: "queued" as const } });
+        console.log(`[AI Proxy][${reqId}] 视频异步任务: ${taskId}，轮询中...`);
+        try {
+          const taskResult = await pollTask(cleanBase, taskId, authHeader);
+          // Extract video URL from result
+          const videoUrl = taskResult?.result?.videos?.[0]?.url?.[0];
+          const seedanceRes = {
+            code: 0,
+            data: {
+              id: taskId,
+              status: (videoUrl ? "succeeded" : "failed") as string,
+              ...(videoUrl ? { content: { video_url: videoUrl } } : {}),
+              ...(taskResult?.result?.last_frame_url ? { content: { last_frame_url: taskResult.result.last_frame_url } } : {}),
+            },
+          };
+          // Cache for GET handler
+          videoTaskCache.set(taskId, seedanceRes);
+          // Clean cache after 5 min
+          setTimeout(() => videoTaskCache.delete(taskId), 300000);
+          console.log(`[AI Proxy][${reqId}] ✅ 视频完成 (${Date.now() - startTime}ms)`);
+          return res.json(seedanceRes);
+        } catch (pollErr: any) {
+          console.error(`[AI Proxy][${reqId}] 视频轮询失败: ${pollErr.message}`);
+          return res.json({ code: 0, data: { id: taskId, status: "failed", error: { message: pollErr.message } } });
+        }
       }
       // For other async tasks (e.g. images), poll synchronously
       console.log(`[AI Proxy][${reqId}] 异步任务: ${json.data[0].task_id}，轮询中...`);

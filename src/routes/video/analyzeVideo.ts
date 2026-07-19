@@ -88,6 +88,10 @@ export default async function analyzeVideo(req: Request, res: Response) {
       }
     }
 
+    // Check if video has an audio stream
+    const audioStream = info.streams.find((s) => s.codec_type === "audio");
+    const hasAudio = !!audioStream;
+
     // Update project with video metadata
     await db("o_project").where("id", projectId).update({
       videoDuration: duration,
@@ -118,6 +122,7 @@ export default async function analyzeVideo(req: Request, res: Response) {
         fps,
         size: parseInt(info.format.size || "0"),
         upscaled,
+        hasAudio,
       },
     });
   } catch (err: any) {
