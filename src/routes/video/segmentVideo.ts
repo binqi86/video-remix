@@ -24,6 +24,21 @@ function parseTime(seconds: number): string {
 type SegmentBoundary = { start: number; end: number };
 
 /**
+ * Merge the last segment into the previous one if it's shorter than minDuration.
+ * This prevents creating a useless tiny segment (e.g. 15s + 15s + 1s → 15s + 16s).
+ */
+function mergeShortTrailingSegment(segments: SegmentBoundary[], minDuration: number = 2): SegmentBoundary[] {
+  if (segments.length < 2) return segments;
+  const last = segments[segments.length - 1];
+  const prev = segments[segments.length - 2];
+  if (last.end - last.start < minDuration) {
+    prev.end = last.end;
+    return segments.slice(0, -1);
+  }
+  return segments;
+}
+
+/**
  * Detect scene changes using FFmpeg's scene detection filter.
  * Returns array of timestamps (seconds) where scene changes occur.
  */
@@ -101,7 +116,11 @@ function segmentByAuto(sceneTimes: number[], duration: number): SegmentBoundary[
       sceneTimes[sceneIdx] < segmentEnd &&
       sceneTimes[sceneIdx] - currentStart > 2
     ) {
-      segmentEnd = sceneTimes[sceneIdx];
+      // 如果按场景切换点切分后，剩余时长 < 2 秒，则不切，直接到结尾
+      const remaining = duration - sceneTimes[sceneIdx];
+      if (remaining >= 2) {
+        segmentEnd = sceneTimes[sceneIdx];
+      }
     }
 
     // Extend to scene change if just beyond the limit
@@ -377,23 +396,23 @@ export default async function segmentVideo(req: Request, res: Response) {
     let segments: SegmentBoundary[];
     switch (mode) {
       case "scene":
-        segments = segmentByScene(sceneTimes, duration);
+        segments = mergeShortTrailingSegment(segmentByScene(sceneTimes, duration));
         break;
       case "dialogue":
-        segments = segmentByDialogue(silenceTimes, duration);
+        segments = mergeShortTrailingSegment(segmentByDialogue(silenceTimes, duration));
         break;
       case "hybrid":
-        segments = segmentByHybrid(sceneTimes, silenceTimes, duration);
+        segments = mergeShortTrailingSegment(segmentByHybrid(sceneTimes, silenceTimes, duration));
         break;
       case "fixed":
-        segments = segmentByFixed(duration, fixedInterval);
+        segments = mergeShortTrailingSegment(segmentByFixed(duration, fixedInterval));
         break;
       case "custom":
         segments = segmentByCustom(customRanges, duration);
         break;
       case "auto":
       default:
-        segments = segmentByAuto(sceneTimes, duration);
+        segments = mergeShortTrailingSegment(segmentByAuto(sceneTimes, duration));
         break;
     }
 

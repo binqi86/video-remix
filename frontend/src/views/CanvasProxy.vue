@@ -35,8 +35,6 @@ const iframeLoaded = ref(false)
 
 const CANVAS_BASE = 'http://localhost:3000'
 
-// The path param can be a regular canvas path (/canvas, /image, etc.)
-// OR an import token (import:xxx) that goes through the bridge
 const rawPath = computed(() => route.query.path as string || '/canvas')
 const isImport = computed(() => rawPath.value.startsWith('import:'))
 
@@ -45,7 +43,7 @@ const iframeUrl = computed(() => {
     const raw = rawPath.value.replace('import:', '')
     const parts = raw.split('&')
     const token = parts[0]
-    const canvasId = parts.find(p => p.startsWith('canvasId='))?.split('=')[1] || ''
+    const canvasId = (route.query.canvasId as string) || ''
     const apiBase = window.location.origin
     const projectId = (route.query.projectId as string) || ''
     let url = `${CANVAS_BASE}/import-bridge.html?token=${token}&api=${encodeURIComponent(apiBase)}`

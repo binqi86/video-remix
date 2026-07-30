@@ -159,6 +159,27 @@
       </div>
     </t-dialog>
 
+    <!-- 导入画布配置弹窗 -->
+    <t-dialog v-model:visible="showImportConfigDialog" header="导入到画布 — 工作流配置"
+      :confirm-btn="{ content: '导入并打开画布', theme: 'primary', loading: importLoading }"
+      @confirm="handleImportConfirm"
+      :close-on-overlay-click="false"
+    >
+      <p style="margin-bottom:12px;font-size:13px;color:var(--td-text-color-placeholder)">
+        已选 {{ selectedIds.size }} 个片段，配置以下工作流参数后自动导入 Infinite Canvas
+      </p>
+      <t-form :data="importConfig" label-align="top" layout="vertical">
+        <t-form-item label="替换角色数量" name="characterCount">
+          <t-input-number v-model="importConfig.characterCount" :min="1" :max="10" style="width:120px" />
+          <span class="config-hint">每个片段将生成对应数量的角色图片空位</span>
+        </t-form-item>
+        <t-form-item label="替换背景" name="replaceBackground">
+          <t-switch v-model="importConfig.replaceBackground" />
+          <span class="config-hint">开启后每个片段会生成一个背景参考图空位</span>
+        </t-form-item>
+      </t-form>
+    </t-dialog>
+
     <!-- Processing Progress Dialog -->
     <t-dialog v-model:visible="showProcessing" header="视频处理中" :footer="false" :close-btn="false" :mask-closable="false" destroy-on-close>
       <div style="padding:16px 0">
@@ -217,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore, type Segment } from '../stores/project'
@@ -248,6 +269,14 @@ const fixedInterval = ref(10)
 const customRanges = ref('0,5|6,10|11,')
 const showResegmentDialog = ref(false)
 const hasAudio = ref(true)
+
+// 导入画布配置
+const showImportConfigDialog = ref(false)
+const importLoading = ref(false)
+const importConfig = reactive({
+  characterCount: 2,
+  replaceBackground: true,
+})
 
 function onNativeFileSelect(e: any) {
   const file = e.target?.files?.[0]
@@ -439,46 +468,215 @@ async function importSelectedToCanvas() {
     MessagePlugin.warning('请先选择要导入的视频片段')
     return
   }
-  const selected = segments.value.filter(s => selectedIds.value.has(s.id))
-  const nodes = selected.map((seg, i) => ({
-    id: `video-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
-    type: 'video',
-    title: `片段 ${seg.sortOrder + 1}`,
-    position: { x: 100 + (i % 3) * 480, y: 100 + Math.floor(i / 3) * 300 },
-    width: 420,
-    height: 236,
-    metadata: {
-      content: getSegmentClipUrl(seg),
-      storageKey: '',
-      status: 'success',
-      mimeType: 'video/mp4',
-      prompt: seg.prompt || '',
-    },
-  }))
+  // 显示配置弹窗
+  showImportConfigDialog.value = true
+}
 
+async function handleImportConfirm() {
+  importLoading.value = true
   try {
-    // If there's an existing canvas, navigate to import-bridge with canvasId to add nodes
-    const bindRes = await fetch(`/api/import/bindings?projectId=${projectId.value}`)
-    const bindData = await bindRes.json()
-    const bindings = bindData.success && bindData.data ? bindData.data : []
-    const existingCanvasId = bindings.length > 0 ? bindings[0].canvasId : ''
+    const selected = segments.value.filter(s => selectedIds.value.has(s.id))
+    const nodes: any[] = []
+    const connections: any[] = []
+    let connIndex = 0
+    let firstPromptTemplate = ''
 
+    // 为每个选中的片段创建节点和连线，从上到下依次排列
+    const CHAR_COL_WIDTH = 220  // 每列宽度
+    const CHAR_ROW_HEIGHT = 130 // 每行高度
+    const charsPerCol = Math.max(1, Math.min(importConfig.characterCount, 4)) // 每列最多4个
+    const charGridHeight = charsPerCol * CHAR_ROW_HEIGHT  // 角色网格高度
+    const segmentHeight = Math.max(280, charGridHeight + 50)  // 每个片段占高
+    selected.forEach((seg, i) => {
+      const label = `片段 ${seg.sortOrder + 1}`
+      const videoUrl = getSegmentClipUrl(seg)
+      const baseY = 100 + i * segmentHeight
+      const baseX = 100
+
+      // 视频节点
+      const videoId = `video-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`
+      const imageNodeIds: string[] = []
+      nodes.push({
+        id: videoId,
+        type: 'video',
+        title: label,
+        position: { x: baseX, y: baseY },
+        width: 420,
+        height: 236,
+        metadata: {
+          content: videoUrl,
+          storageKey: '',
+          status: 'success',
+          mimeType: 'video/mp4',
+          prompt: seg.prompt || '',
+        },
+      })
+
+      // 角色占位图节点（不连视频，待会统一连向配置节点）
+      for (let ci = 0; ci < importConfig.characterCount; ci++) {
+        const charId = `char-${Date.now()}-${i}-${ci}-${Math.random().toString(36).slice(2, 7)}`
+        const col = Math.floor(ci / charsPerCol)
+        const row = ci % charsPerCol
+        nodes.push({
+          id: charId,
+          type: 'image',
+          title: `角色${ci + 1} - ${label}`,
+          position: { x: baseX + 440 + col * CHAR_COL_WIDTH, y: baseY + row * CHAR_ROW_HEIGHT },
+          width: 200,
+          height: 110,
+          metadata: {
+            content: '',
+            storageKey: '',
+            status: 'empty',
+            mimeType: 'image/png',
+            prompt: `角色${ci + 1}占位 - 请替换为角色图片`,
+          },
+        })
+        imageNodeIds.push(charId)
+      }
+
+      // 背景参考图节点（如果开启）
+      if (importConfig.replaceBackground) {
+        const bgId = `bg-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`
+        const bgCol = Math.floor(importConfig.characterCount / charsPerCol)
+        const bgRow = importConfig.characterCount % charsPerCol
+        nodes.push({
+          id: bgId,
+          type: 'image',
+          title: `背景参考 - ${label}`,
+          position: { x: baseX + 440 + bgCol * CHAR_COL_WIDTH, y: baseY + bgRow * CHAR_ROW_HEIGHT + 10 },
+          width: 200,
+          height: 110,
+          metadata: {
+            content: '',
+            storageKey: '',
+            status: 'empty',
+            mimeType: 'image/png',
+            prompt: '背景参考占位 - 请替换为背景图',
+          },
+        })
+        imageNodeIds.push(bgId)
+      }
+
+      // 生成配置节点（所有节点都连向它，因为配置节点里有生成按钮）
+      const configId = `config-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`
+      // 计算所有图片占用的总列数（角色列 + 可能单独占一列的背景图）
+      const charCols = Math.ceil(importConfig.characterCount / charsPerCol)
+      const bgCol = Math.floor(importConfig.characterCount / charsPerCol)
+      const totalImgCols = importConfig.replaceBackground ? Math.max(charCols, bgCol + 1) : charCols
+      const configX = baseX + 440 + totalImgCols * CHAR_COL_WIDTH + 40
+      const configY = baseY + 20
+
+      // 根据配置动态生成提示词
+      // 站位从左到右排列：左一、左二、…C位…右二、右一
+      const charLabels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+      const charList = []
+      const mid = Math.floor(importConfig.characterCount / 2)
+      const numWords = ['一', '二', '三', '四', '五', '六', '七', '八']
+      for (let ci = 0; ci < importConfig.characterCount; ci++) {
+        let pos
+        if (importConfig.characterCount % 2 === 1 && ci === mid) {
+          pos = '中间C位'
+        } else if (ci < mid) {
+          // 左侧：左一、左二…
+          pos = `左侧${numWords[ci]}`
+        } else {
+          // 右侧：右一、右二…（从右往左数）
+          const ri = importConfig.characterCount - 1 - ci
+          pos = `右侧${numWords[ri]}`
+        }
+        charList.push(`${ci + 1}. 原视频${pos}舞者 → 替换为【动漫角色${charLabels[ci]}】`)
+      }
+      let prompt = `严格参考原版真人舞蹈视频，1:1精准复刻全员舞蹈动作、肢体细节、节拍卡点、走位路线、队形排列，全程队形整齐无偏移，无动作滞后、无动作变形。
+人物精准对位替换：视频内所有真人舞者按原视频固定站位一对一精准替换动漫角色，对位精准不错乱，严格匹配原始站位、队形不变。
+${charList.join('\n')}
+所有替换角色容貌、发型、服饰、妆容全程固定锁定，无任何样貌、穿搭变动。`
+      if (importConfig.replaceBackground) {
+        prompt += `
+场景适配要求：彻底替换全部原始背景场景，空间透视、场地大小、地面纵深与原视频完全匹配，适配全员舞蹈跑动走位。`
+      }
+      prompt += `
+画质整体要求：画面丝滑流畅，无卡顿、无闪烁，高清4K画质，60帧高帧率动态效果，整体画面、光影风格统一协调。
+肢体模型禁止：肢体畸形、穿模穿插、手脚畸变、比例错乱、肢体僵硬抽搐、浮空扭曲。
+舞蹈动作禁止：动作错位、卡点不准、走位混乱、队形偏移、动作滞后、全员动作不同步。
+人物形象禁止：脸型漂移、五官崩坏、面部抖动、容貌、发型、服饰、妆容随机变动。
+场景空间禁止：原背景残留、场景碎片、透视错误、场地变形、地面纵深错乱。
+画面画质禁止：卡顿掉帧、画面撕裂闪烁、模糊噪点、水印文字、多余杂物、多余路人。
+光影色彩禁止：光影割裂、明暗突变、色彩失真、角色大小异常、色调不统一。`
+      if (i === 0) firstPromptTemplate = prompt
+      nodes.push({
+        id: configId,
+        type: 'config',
+        title: `生成配置 - ${label}`,
+        position: { x: configX, y: configY },
+        width: 340,
+        height: 240,
+        metadata: {
+          model: '',
+          size: '1024x1024',
+          count: 1,
+          prompt: prompt,
+          status: 'idle',
+          generationMode: 'image',
+        },
+      })
+      // 视频节点 → 配置节点
+      connections.push({
+        id: `conn-${Date.now()}-${connIndex++}`,
+        fromNodeId: videoId,
+        toNodeId: configId,
+      })
+      // 每个图片节点 → 配置节点
+      imageNodeIds.forEach((imgId) => {
+        connections.push({
+          id: `conn-${Date.now()}-${connIndex++}`,
+          fromNodeId: imgId,
+          toNodeId: configId,
+        })
+      })
+    })
+
+    // 通过 import-bridge 导入
     const res = await fetch('/api/import/prepare', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodes, connections: [] }),
+      body: JSON.stringify({ nodes, connections }),
     })
     const data = await res.json()
     if (data.success) {
-      let path = 'import:' + data.data.token
-      if (existingCanvasId) path += '&canvasId=' + existingCanvasId
+      showImportConfigDialog.value = false
       MessagePlugin.success(`已导入 ${nodes.length} 个素材到画布`)
-      router.push('/canvas-proxy?path=' + encodeURIComponent(path) + '&projectId=' + projectId.value)
+      // 保存工作流配置到项目
+      await fetch('/api/project/editProject', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId.value,
+          workflowConfig: {
+            characterCount: importConfig.characterCount,
+            replaceBackground: importConfig.replaceBackground,
+            promptTemplate: firstPromptTemplate,
+          },
+        }),
+      })
+      // 检查是否有已有画布绑定，有则传入 canvasId 以复用
+      let canvasParam = ''
+      try {
+        const bindRes = await fetch(`/api/import/bindings?projectId=${projectId.value}`)
+        const bindData = await bindRes.json()
+        const bindings = bindData.success && bindData.data ? bindData.data : []
+        if (bindings.length > 0) {
+          canvasParam = '&canvasId=' + encodeURIComponent(bindings[0].canvasId)
+        }
+      } catch {}
+      router.push('/canvas-proxy?path=' + encodeURIComponent('import:' + data.data.token) + '&projectId=' + projectId.value + canvasParam)
     } else {
       MessagePlugin.error('导入失败')
     }
   } catch (err: any) {
     MessagePlugin.error(`导入失败: ${err.message}`)
+  } finally {
+    importLoading.value = false
   }
 }
 
@@ -691,6 +889,8 @@ function genPercentLabel(seg: Segment) { if (seg.videoGenState==='completed') re
 .gen-results-section { margin-top: 8px; }
 .gen-upload-area { cursor: pointer; border: 2px dashed var(--td-border-level-2-color); background: var(--td-bg-color-secondary); box-sizing: border-box; }
 .gen-upload-area:hover { border-color: var(--td-brand-color); background: var(--td-brand-color-light); }
+
+.config-hint { font-size: 12px; color: var(--td-text-color-placeholder); display: block; margin-top: 4px; }
 
 
 
