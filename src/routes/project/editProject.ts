@@ -3,7 +3,7 @@ import { db } from "../../utils/db";
 
 export default async function editProject(req: Request, res: Response) {
   try {
-    const { id, name, description, textModel, imageModel, videoModel, status } = req.body;
+    const { id, name, description, textModel, imageModel, videoModel, status, workflowConfig } = req.body;
     if (!id) {
       return res.status(400).json({ success: false, message: "缺少项目ID" });
     }
@@ -14,6 +14,7 @@ export default async function editProject(req: Request, res: Response) {
     if (imageModel !== undefined) updateData.imageModel = imageModel;
     if (videoModel !== undefined) updateData.videoModel = videoModel;
     if (status !== undefined) updateData.status = status;
+    if (workflowConfig !== undefined) updateData.workflowConfig = JSON.stringify(workflowConfig);
 
     await db("o_project").where("id", id).update(updateData);
     const project = await db("o_project").where("id", id).first();

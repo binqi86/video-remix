@@ -91,6 +91,10 @@ export async function initDB(): Promise<void> {
     await db("o_setting").insert({ key: "defaultTextModel", value: "" });
     await db("o_setting").insert({ key: "defaultImageModel", value: "" });
     await db("o_setting").insert({ key: "defaultVideoModel", value: "" });
+    await db("o_setting").insert({
+      key: "defaultPromptTemplate",
+      value: "保持原视频的动作和运镜，将人物替换为{角色}，场景替换为{背景描述}",
+    });
   }
 
   // Seed default vendor config template
@@ -116,6 +120,17 @@ export async function initDB(): Promise<void> {
     const hasColumn = columns.some((c: any) => c.name === "segmentationMode");
     if (!hasColumn) {
       exec("ALTER TABLE o_project ADD COLUMN segmentationMode TEXT DEFAULT 'auto'");
+    }
+  } catch {
+    // Migration already applied or table doesn't exist yet
+  }
+
+  // Migration: add workflowConfig column if missing
+  try {
+    const columns = queryAll("PRAGMA table_info(o_project)");
+    const hasWorkflowConfig = columns.some((c: any) => c.name === "workflowConfig");
+    if (!hasWorkflowConfig) {
+      exec("ALTER TABLE o_project ADD COLUMN workflowConfig TEXT DEFAULT '{}'");
     }
   } catch {
     // Migration already applied or table doesn't exist yet

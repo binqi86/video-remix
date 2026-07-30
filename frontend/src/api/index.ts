@@ -56,6 +56,17 @@ export const settingApi = {
   update: (key: string, value: string) => api.put('/setting/updateSetting', { key, value }),
 }
 
+// Workflow APIs
+export const workflowApi = {
+  saveConfig: (projectId: number, config: { characterCount: number; replaceBackground: boolean; promptTemplate: string }) =>
+    api.put('/project/editProject', { id: projectId, workflowConfig: config }),
+  getConfig: (projectId: number) =>
+    api.get('/project/getProject', { params: { id: projectId } }).then(res => {
+      const project = res.data.data
+      return project?.workflowConfig ? JSON.parse(project.workflowConfig) : null
+    }),
+}
+
 // Task APIs
 export const taskApi = {
   list: (projectId: number) => api.get('/task/listTasks', { params: { projectId } }),
