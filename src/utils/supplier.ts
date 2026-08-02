@@ -17,8 +17,6 @@ let cachedSuppliers: SupplierConfig[] | null = null;
 
 // JSON file is the SOURCE OF TRUTH — survives DB corruption
 const CONFIG_PATH = path.resolve(__dirname, "..", "data", "suppliers.json");
-// Legacy backup path (kept for backward compat)
-const BACKUP_PATH = path.resolve(__dirname, "..", "data", "suppliers.backup.json");
 // Example config committed to GitHub (no real API keys)
 const EXAMPLE_PATH = path.resolve(__dirname, "..", "data", "suppliers.example.json");
 
@@ -27,8 +25,6 @@ function writeConfigFile(suppliers: SupplierConfig[]): void {
     const dir = path.dirname(CONFIG_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(suppliers, null, 2));
-    // Also keep the legacy backup path in sync
-    fs.writeFileSync(BACKUP_PATH, JSON.stringify(suppliers, null, 2));
   } catch (e) {
     console.error("[Supplier] 写入配置文件失败:", e.message);
   }
@@ -38,13 +34,6 @@ function readConfigFile(): SupplierConfig[] | null {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const data = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-      if (Array.isArray(data) && data.length > 0) return data;
-    }
-  } catch {}
-  // Fallback to legacy backup
-  try {
-    if (fs.existsSync(BACKUP_PATH)) {
-      const data = JSON.parse(fs.readFileSync(BACKUP_PATH, "utf8"));
       if (Array.isArray(data) && data.length > 0) return data;
     }
   } catch {}

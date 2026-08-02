@@ -5,9 +5,13 @@ import startServe, { closeServe as closeBackend } from "../src/app";
 
 const CANVAS_PORT = 3000;
 const CANVAS_DIR = path.resolve(__dirname, "..", "infinite-canvas", "web");
+const FRONTEND_PORT = 5173;
+const FRONTEND_DIR = path.resolve(__dirname, "..", "frontend");
 
 let mainWindow: BrowserWindow | null = null;
 let canvasProcess: ChildProcess | null = null;
+let frontendProcess: ChildProcess | null = null;
+let uiPort = 3001; // 前端页面地址,dev 下由 Vite dev server 提供,否则由后端托管
 
 // Set app name for dock tooltip and macOS menu bar
 // Note: In dev mode (unpackaged), macOS shows "Electron" in the dock
@@ -74,6 +78,74 @@ function startInfiniteCanvas(): Promise<void> {
 
     // Timeout after 30s - don't block main app
     setTimeout(() => resolve(), 30000);
+  });
+}
+
+// 启动前端 Vite dev server,供 Electron 窗口加载(dev 下支持热更新)。
+// 返回 0 表示回退到后端托管(如依赖未安装或启动失败)。
+function startFrontend(): Promise<number> {
+  return new Promise((resolve) => {
+    const fs = require("fs");
+    const viteBin = path.join(FRONTEND_DIR, "node_modules", ".bin", "vite");
+    if (!fs.existsSync(viteBin)) {
+      console.warn(`[Frontend] 前端依赖未安装,无法启动 dev 服务。请先执行: cd frontend && npm install`);
+      console.warn(`[Frontend] 回退到后端托管的静态构建 (frontend/dist)`);
+      resolve(0);
+      return;
+    }
+
+    let ready = false;
+    let readyTimer: ReturnType<typeof setTimeout> | undefined;
+    const done = (port: number) => {
+      if (ready) return;
+      ready = true;
+      if (readyTimer) clearTimeout(readyTimer);
+      resolve(port);
+    };
+
+    console.log(`[Frontend] 启动前端 dev 服务 (${FRONTEND_DIR})...`);
+    frontendProcess = spawn(viteBin, ["--port", String(FRONTEND_PORT)], {
+      cwd: FRONTEND_DIR,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const onData = (data: Buffer) => {
+      const msg = data.toString();
+      console.log(`[Frontend] ${msg.trim()}`);
+      // 端口可能被占用时 Vite 会自动换端口,故从输出中解析实际地址
+      const portMatch = msg.match(/localhost:(\d+)/);
+      if (portMatch) {
+        const actual = parseInt(portMatch[1], 10);
+        console.log(`[Frontend] 前端 dev 服务已启动: http://localhost:${actual}`);
+        done(actual);
+      }
+    };
+    const onError = (data: Buffer) => {
+      console.error(`[Frontend] ${data.toString().trim()}`);
+      onData(data);
+    };
+
+    frontendProcess.stdout?.on("data", onData);
+    frontendProcess.stderr?.on("data", onError);
+
+    frontendProcess.on("error", (err) => {
+      console.error(`[Frontend] 启动失败:`, err.message);
+      frontendProcess = null;
+      done(0);
+    });
+
+    frontendProcess.on("exit", (code) => {
+      console.log(`[Frontend] 进程退出 (code: ${code})`);
+      frontendProcess = null;
+    });
+
+    // 30s 内未就绪则回退,不阻塞主应用
+    readyTimer = setTimeout(() => {
+      if (frontendProcess && !ready) {
+        console.warn(`[Frontend] 等待 dev 服务超时,回退到后端托管`);
+        done(0);
+      }
+    }, 30000);
   });
 }
 
@@ -150,7 +222,15 @@ app.whenReady().then(async () => {
     // Step 3: Start infinite-canvas in background
     startInfiniteCanvas();
 
-    // Step 3: Register custom protocol
+    // Step 4: dev 下启动前端 Vite dev server,Electron 窗口从它加载(支持热更新);
+    // 打包 (app.isPackaged) 时回退到后端托管的 frontend/dist。
+    uiPort = port;
+    if (!app.isPackaged) {
+      const frontendPort = await startFrontend();
+      if (frontendPort > 0) uiPort = frontendPort;
+    }
+
+    // Step 5: Register custom protocol
     protocol.handle("videoremix", (request) => {
       const url = new URL(request.url);
       const pathname = url.hostname.toLowerCase();
@@ -175,7 +255,7 @@ app.whenReady().then(async () => {
       });
     });
 
-    await createMainWindow(port);
+    await createMainWindow(uiPort);
   } catch (err) {
     console.error("[App] 启动失败:", err);
   }
@@ -187,15 +267,19 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    createMainWindow(parseInt(process.env.PORT || "3001"));
+    createMainWindow(uiPort);
   }
 });
 
 app.on("before-quit", async () => {
-  // Cleanup: kill infinite-canvas process
+  // Cleanup: kill infinite-canvas / frontend process
   if (canvasProcess) {
     canvasProcess.kill();
     canvasProcess = null;
+  }
+  if (frontendProcess) {
+    frontendProcess.kill();
+    frontendProcess = null;
   }
   await closeBackend().catch(() => {});
 });

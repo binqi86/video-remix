@@ -14,5 +14,7 @@ src/data/db.sqlite
 .DS_Store
 *.log
 infinite-canvas/
-src/data/suppliers.backup.json
 src/data/suppliers.json
+*.sqlite-wal
+*.sqlite-shm
+src/data/_bak/
