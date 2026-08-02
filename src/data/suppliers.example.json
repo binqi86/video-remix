@@ -1,0 +1,27 @@
+[
+  {
+    "id": "s_apimart",
+    "name": "ApiMart",
+    "enabled": true,
+    "baseUrl": "https://api.aishuch.com/v1",
+    "apiKey": "YOUR_APIMART_API_KEY",
+    "tunnelEnabled": true,
+    "pollTimeout": 1800,
+    "endpointMappings": [
+      { "from": "/v1/images/edits", "to": "/v1/images/generations", "imageField": "image", "imageTarget": "image_urls", "passthroughFields": ["prompt", "model", "n", "size"] },
+      { "from": "/v1/contents/generations/tasks", "to": "/v1/videos/generations" }
+    ]
+  },
+  {
+    "id": "s_doubao",
+    "name": "字节豆包",
+    "enabled": true,
+    "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    "apiKey": "YOUR_VOLC_API_KEY",
+    "tunnelEnabled": true,
+    "pollTimeout": 1800,
+    "endpointMappings": [
+      { "from": "/v1/images/edits", "to": "/v1/images/generations", "imageField": "image", "imageTarget": "image", "passthroughFields": ["prompt", "model", "size"] }
+    ]
+  }
+]

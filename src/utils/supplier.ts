@@ -14,48 +14,101 @@ export interface SupplierConfig {
 }
 
 let cachedSuppliers: SupplierConfig[] | null = null;
-const BACKUP_PATH = path.resolve(__dirname, "..", "data", "suppliers.backup.json");
 
-function backupToFile(suppliers: SupplierConfig[]): void {
+// JSON file is the SOURCE OF TRUTH — survives DB corruption
+const CONFIG_PATH = path.resolve(__dirname, "..", "data", "suppliers.json");
+// Legacy backup path (kept for backward compat)
+const BACKUP_PATH = path.resolve(__dirname, "..", "data", "suppliers.backup.json");
+// Example config committed to GitHub (no real API keys)
+const EXAMPLE_PATH = path.resolve(__dirname, "..", "data", "suppliers.example.json");
+
+function writeConfigFile(suppliers: SupplierConfig[]): void {
   try {
+    const dir = path.dirname(CONFIG_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(suppliers, null, 2));
+    // Also keep the legacy backup path in sync
     fs.writeFileSync(BACKUP_PATH, JSON.stringify(suppliers, null, 2));
-  } catch {}
+  } catch (e) {
+    console.error("[Supplier] 写入配置文件失败:", e.message);
+  }
 }
 
-function restoreFromFile(): SupplierConfig[] {
+function readConfigFile(): SupplierConfig[] | null {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      const data = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch {}
+  // Fallback to legacy backup
   try {
     if (fs.existsSync(BACKUP_PATH)) {
-      return JSON.parse(fs.readFileSync(BACKUP_PATH, "utf8"));
+      const data = JSON.parse(fs.readFileSync(BACKUP_PATH, "utf8"));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch {}
+  return null;
+}
+
+function loadFromExample(): SupplierConfig[] {
+  // Used when no local config exists (e.g. fresh clone from GitHub)
+  try {
+    if (fs.existsSync(EXAMPLE_PATH)) {
+      const data = JSON.parse(fs.readFileSync(EXAMPLE_PATH, "utf8"));
+      if (Array.isArray(data)) return data;
     }
   } catch {}
   return [];
 }
 
 export async function getSuppliers(): Promise<SupplierConfig[]> {
+  // 1. Read from JSON file (source of truth, real API keys)
+  const fileSuppliers = readConfigFile();
+  if (fileSuppliers) {
+    cachedSuppliers = fileSuppliers;
+    // Sync to DB (in case DB was wiped)
+    try {
+      exec("INSERT OR REPLACE INTO o_setting (key, value) VALUES (?, ?)", ["suppliers", JSON.stringify(fileSuppliers)]);
+    } catch {}
+    return fileSuppliers;
+  }
+
+  // 2. Fallback to example config (fresh clone from GitHub, no real keys)
+  const exampleSuppliers = loadFromExample();
+  if (exampleSuppliers.length > 0) {
+    console.log("[Supplier] 使用示例配置，请在设置中填入 API Key");
+    writeConfigFile(exampleSuppliers);
+    cachedSuppliers = exampleSuppliers;
+    try {
+      exec("INSERT OR REPLACE INTO o_setting (key, value) VALUES (?, ?)", ["suppliers", JSON.stringify(exampleSuppliers)]);
+    } catch {}
+    return exampleSuppliers;
+  }
+
+  // 3. Fallback to DB
   try {
     const row = await db("o_setting").where("key", "suppliers").first();
     if (row?.value) {
       const parsed = JSON.parse(row.value);
       cachedSuppliers = parsed;
+      // Persist to JSON file for future resilience
+      if (Array.isArray(parsed) && parsed.length > 0) writeConfigFile(parsed);
       return parsed;
     }
   } catch {}
-  // DB is empty — try to restore from backup file
-  const backup = restoreFromFile();
-  if (backup.length > 0) {
-    console.log("[Supplier] 从备份文件恢复供应商配置");
-    await saveSuppliers(backup);
-    return backup;
-  }
+
   if (!cachedSuppliers) cachedSuppliers = [];
   return cachedSuppliers;
 }
 
 export async function saveSuppliers(suppliers: SupplierConfig[]): Promise<void> {
+  // Always write to JSON file first (source of truth)
+  writeConfigFile(suppliers);
+  // Then mirror to DB
   const value = JSON.stringify(suppliers);
   exec("INSERT OR REPLACE INTO o_setting (key, value) VALUES (?, ?)", ["suppliers", value]);
   syncSave();
-  backupToFile(suppliers);
   cachedSuppliers = suppliers;
 }
 
