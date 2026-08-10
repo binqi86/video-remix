@@ -28,7 +28,7 @@
             <t-descriptions-item label="分辨率">{{ project.videoWidth }}x{{ project.videoHeight }}</t-descriptions-item>
             <t-descriptions-item label="帧率">{{ project.videoFps?.toFixed(1) }}fps</t-descriptions-item>
             <t-descriptions-item label="分段模式">
-              <t-tag size="small">{{ modeLabel(project.segmentationMode || 'auto') }}</t-tag>
+              <t-tag size="small">{{ modeLabel(project.segmentationMode || 'shot') }}</t-tag>
             </t-descriptions-item>
           </t-descriptions>
         </div>
@@ -79,44 +79,36 @@
             <div class="segment-info">
               <div style="display:flex;align-items:center;justify-content:space-between">
                 <span class="segment-title">片段 {{ index + 1 }}</span>
-                <span class="segment-meta">{{ seg.duration.toFixed(1) }}s</span>
+                <span class="segment-meta" style="display:flex;align-items:center;gap:6px">
+                  <span v-if="seg.duration < 4" class="short-badge" title="生成最短 4 秒，建议与相邻片段合并">过短</span>
+                  {{ seg.duration.toFixed(1) }}s
+                </span>
               </div>
               <div style="margin-top:4px;font-size:11px;line-height:1.8">
                 <span style="color:var(--td-brand-color);cursor:pointer" @click.stop="openCanvas(seg)">画布</span>
                 <span style="margin-left:12px;color:var(--td-text-color-placeholder);cursor:pointer" @click.stop="exportFrame(seg,'first')">首帧</span>
                 <span style="margin-left:12px;color:var(--td-text-color-placeholder);cursor:pointer" @click.stop="exportFrame(seg,'last')">尾帧</span>
+                <span v-if="index < segments.length - 1 && !isGenerating && mergingId !== seg.id" style="margin-left:12px;color:var(--td-brand-color);cursor:pointer" @click.stop="mergeSegment(seg, segments[index + 1])">{{ mergingId === seg.id ? '合并中...' : '与下段合并' }}</span>
+                <span v-if="seg.splitPoints && seg.splitPoints.length > 0 && !isGenerating" style="margin-left:12px;color:var(--td-brand-color);cursor:pointer" @click.stop="splitSegment(seg)">{{ splittingId === seg.id ? '拆分中...' : '拆分' }}</span>
+              </div>
+              <!-- 对话音频（按说话顺序添加，导入画布时自动带音频与绑定提示词） -->
+              <div v-if="seg.speechAudios && seg.speechAudios.length" class="segment-audios">
+                <div v-for="(au, ai) in seg.speechAudios" :key="au.path" class="audio-chip">
+                  <span class="audio-num">{{ ['①','②','③'][ai] ?? ai + 1 }}</span>
+                  <t-icon name="sound" size="14px" class="audio-play" @click.stop="playSpeechAudio(au)" />
+                  <span class="audio-name" :title="au.fileName">{{ au.fileName }}</span>
+                  <span class="audio-dur">{{ (au.durationMs / 1000).toFixed(1) }}s</span>
+                  <span v-if="!isGenerating" class="audio-op" title="前移" @click.stop="reorderSpeech(seg, ai, ai - 1)">↑</span>
+                  <span v-if="!isGenerating" class="audio-op" title="后移" @click.stop="reorderSpeech(seg, ai, ai + 1)">↓</span>
+                  <span v-if="!isGenerating" class="audio-op audio-del" title="移除" @click.stop="removeSpeech(seg, ai)">✕</span>
+                </div>
+              </div>
+              <div v-if="!isGenerating" class="segment-audio-add">
+                <input type="file" accept="audio/*" style="display:none" :ref="(el) => audioInputRefs[seg.id] = el as HTMLInputElement | null" @change="onSpeechAudioChange(seg, $event)" />
+                <span class="audio-add-btn" @click.stop="openAudioPicker(seg)"><t-icon name="plus" size="12px" /> 添加对话音频（{{ (seg.speechAudios || []).length }}/3）</span>
               </div>
             </div>
             <!-- Generated video section removed to separate grid below -->
-          </div>
-        </div>
-      </div>
-
-
-      <!-- Generated video results -->
-      <div v-if="segments.length > 0" class="gen-results-section">
-        <div class="segment-toolbar" style="margin-top:24px">
-          <h2>生成视频结果（{{ segments.length }} 个）</h2>
-        </div>
-        <div class="segment-grid">
-          <div v-for="(seg, index) in segments" :key="'gen-'+seg.id" class="segment-card">
-            <div v-if="seg.videoGenPath && seg.videoGenState === 'completed'" class="segment-thumb" style="cursor:pointer" @click="previewGeneratedVideo(seg)">
-              <video :key="'gv-'+seg.id+'-'+genRefreshKey" :src="getGeneratedVideoUrl(seg)" muted preload="metadata" />
-              <div class="play-overlay"><t-icon name="play-circle" size="32px" /></div>
-              <div class="gen-replace" @click.stop="triggerGenUpload(seg)">替换</div>
-            </div>
-            <div v-else class="gen-upload-area" @click="triggerGenUpload(seg)" @dragover.prevent @drop.prevent="handleGenDrop($event, seg)" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:130px;text-align:center">
-              <t-icon name="upload" size="24px" style="color:var(--td-brand-color)" />
-              <span style="font-size:12px;color:var(--td-text-color-placeholder)">上传或等待生成</span>
-            </div>
-            <div class="segment-info">
-              <div style="font-weight:600;font-size:13px">结果 {{ index + 1 }}</div>
-              <div style="font-size:11px;line-height:1.8">
-                <span style="color:var(--td-brand-color);cursor:pointer" @click.stop="openCanvas(seg)">画布</span>
-                <span style="margin-left:12px;color:var(--td-text-color-placeholder);cursor:pointer" @click.stop="exportFrame(seg,'first','generated')">首帧</span>
-                <span style="margin-left:12px;color:var(--td-text-color-placeholder);cursor:pointer" @click.stop="exportFrame(seg,'last','generated')">尾帧</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -146,10 +138,6 @@
             {{ opt.label }}
           </t-radio>
         </div>
-        <div v-if="segmentationMode === 'fixed'" class="fixed-interval-input">
-          <label>间隔（秒）:</label>
-          <t-input v-model="fixedInterval" type="number" :min="3" :max="15" style="width:80px;margin-left:8px" />
-        </div>
         <div v-if="segmentationMode === 'custom'" class="fixed-interval-input">
           <label>自定义范围:</label>
           <t-input v-model="customRanges" placeholder="例: 0,5|6,10|11," style="width:260px;margin-left:8px;font-size:12px" />
@@ -160,22 +148,39 @@
     </t-dialog>
 
     <!-- 导入画布配置弹窗 -->
-    <t-dialog v-model:visible="showImportConfigDialog" header="导入到画布 — 工作流配置"
+    <t-dialog v-model:visible="showImportConfigDialog" header="导入到画布 — 替换配置"
       :confirm-btn="{ content: '导入并打开画布', theme: 'primary', loading: importLoading }"
       @confirm="handleImportConfirm"
       :close-on-overlay-click="false"
     >
       <p style="margin-bottom:12px;font-size:13px;color:var(--td-text-color-placeholder)">
-        已选 {{ selectedIds.size }} 个片段，配置以下工作流参数后自动导入 Infinite Canvas
+        已选 {{ selectedIds.size }} 个片段。选好替换场景、上传角色图/背景图、加对话音频，提示词会自动生成。
       </p>
       <t-form :data="importConfig" label-align="top" layout="vertical">
-        <t-form-item label="替换角色数量" name="characterCount">
+        <t-form-item label="替换场景" name="scenario">
+          <div class="scenario-grid">
+            <div v-for="opt in scenarioOptions" :key="opt.value" class="scenario-option" :class="{ active: importConfig.scenario === opt.value }" @click="selectScenario(opt.value)">
+              <div class="scenario-name">{{ opt.label }}</div>
+              <div class="scenario-desc">{{ opt.desc }}</div>
+            </div>
+          </div>
+        </t-form-item>
+        <t-form-item v-if="importConfig.scenario !== 'scene'" label="替换角色数量" name="characterCount">
           <t-input-number v-model="importConfig.characterCount" :min="1" :max="10" style="width:120px" />
-          <span class="config-hint">每个片段将生成对应数量的角色图片空位</span>
+          <span class="config-hint">每个片段生成对应数量的角色图空位</span>
         </t-form-item>
         <t-form-item label="替换背景" name="replaceBackground">
           <t-switch v-model="importConfig.replaceBackground" />
-          <span class="config-hint">开启后每个片段会生成一个背景参考图空位</span>
+          <span class="config-hint">每个片段生成一个背景参考图空位</span>
+        </t-form-item>
+        <t-form-item label="自动提示词（可微调）" name="promptOverride">
+          <div class="prompt-preview">
+            <textarea v-model="importConfig.promptOverride" rows="6" class="prompt-textarea"></textarea>
+            <div class="prompt-actions">
+              <span class="prompt-advice">有对话音频的片段会自动追加「音频N 对应说话人 + 口型同步」绑定提示词</span>
+              <t-button size="small" variant="outline" @click="importConfig.promptOverride = autoPrompt">重置为推荐</t-button>
+            </div>
+          </div>
         </t-form-item>
       </t-form>
     </t-dialog>
@@ -193,18 +198,6 @@
       </div>
     </t-dialog>
 
-    <!-- Generation Progress Dialog -->
-    <t-dialog v-model:visible="showGenProgress" header="生成进度" :footer="false" :close-btn="true">
-      <div v-for="seg in segments" :key="seg.id" class="gen-item">
-        <span>片段 {{ seg.sortOrder + 1 }}</span>
-        <t-progress :percentage="genPercent(seg)" :label="genPercentLabel(seg)" />
-      </div>
-      <div v-if="genStore.outputUrl" class="output-section">
-        <t-divider /><h4>生成完成!</h4>
-        <video :src="genStore.outputUrl" controls style="width:100%; max-height:300px" />
-      </div>
-    </t-dialog>
-
     <!-- Video Preview Dialog -->
     <t-dialog v-model:visible="showVideoPreview" header="视频预览" width="800px" :footer="false" :close-btn="true" destroy-on-close>
       <video v-if="previewUrl" :src="previewUrl" controls autoplay style="width:100%; max-height:70vh" />
@@ -215,15 +208,11 @@
       :confirm-btn="{ content: '开始重新分段', theme: 'primary' }"
       @confirm="handleResegment">
       <div class="segmentation-mode-selector">
-        <p class="mode-label">当前分段方式: <t-tag size="small">{{ modeLabel(project.segmentationMode || 'auto') }}</t-tag></p>
+        <p class="mode-label">当前分段方式: <t-tag size="small">{{ modeLabel(project.segmentationMode || 'shot') }}</t-tag></p>
         <div class="mode-radio-group">
           <t-radio v-for="opt in modeOptions" :key="opt.value" :value="opt.value" :checked="segmentationMode === opt.value" :disabled="opt.disabled" name="segmentationMode" @change="segmentationMode = opt.value">
             {{ opt.label }}
           </t-radio>
-        </div>
-        <div v-if="segmentationMode === 'fixed'" class="fixed-interval-input">
-          <label>间隔（秒）:</label>
-          <t-input v-model="fixedInterval" type="number" :min="3" :max="15" style="width:80px;margin-left:8px" />
         </div>
         <div v-if="segmentationMode === 'custom'" class="fixed-interval-input">
           <label>自定义范围:</label>
@@ -238,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore, type Segment } from '../stores/project'
@@ -258,25 +247,77 @@ const selectAll = ref(false)
 
 const showUploadDialog = ref(false)
 const uploadFiles = ref<any[]>([])
-const showGenProgress = ref(false)
 const showVideoPreview = ref(false)
 const previewUrl = ref('')
 const videoRefs = ref<any[]>([])
 const fileInput = ref<any>(null)
 const selectedFileName = ref('')
-const segmentationMode = ref('auto')
-const fixedInterval = ref(10)
+const segmentationMode = ref('shot')
 const customRanges = ref('0,5|6,10|11,')
 const showResegmentDialog = ref(false)
-const hasAudio = ref(true)
 
 // 导入画布配置
 const showImportConfigDialog = ref(false)
 const importLoading = ref(false)
 const importConfig = reactive({
+  scenario: 'characters',
   characterCount: 2,
-  replaceBackground: true,
+  replaceBackground: false,
+  promptOverride: '',
 })
+
+const scenarioOptions = [
+  { value: 'characters', label: '人物替换', desc: '替换人物，动作/运镜不变' },
+  { value: 'scene', label: '场景替换', desc: '只换背景场景' },
+  { value: 'both', label: '人物+场景', desc: '人物与背景一起替换' },
+  { value: 'dialogue', label: '对话替换', desc: '同步对话音频与口型' },
+]
+
+function buildPrompt(scenario: string, characterCount: number, replaceBackground: boolean): string {
+  const sections: string[] = []
+  if (scenario === 'scene') {
+    sections.push('保持原视频的人物、动作、运镜、构图不变，不做人物替换。')
+  } else {
+    const charList: string[] = []
+    for (let ci = 0; ci < characterCount; ci++) {
+      charList.push(`人物${ci + 1} → 替换为【在此 @ 引用角色${ci + 1}图片】`)
+    }
+    sections.push('将【在此 @ 引用原视频】画面中的人物按站位顺序替换为指定角色，动作、运镜、画面构图保持原样不变：')
+    sections.push(charList.join('\n'))
+    sections.push('所有替换角色容貌、发型、服饰、妆容全程保持稳定一致，不漂移、不变形。')
+  }
+  if (replaceBackground) {
+    sections.push('将画面背景替换为指定场景，空间透视、光线方向、地面纵深与参考图一致，人物与动作保持不变：')
+    sections.push('背景 → 【在此 @ 引用背景参考图】')
+  }
+  if (scenario === 'dialogue') {
+    sections.push('人物对话音频按说话顺序编号（音频1、音频2、音频3…），说话口型与对应音频严格同步，内容、语气、情绪与音频一致：')
+    sections.push('对话1 → 【在此 @ 引用音频1】')
+    sections.push('对话2 → 【在此 @ 引用音频2】')
+  }
+  sections.push('画质要求：画面清晰流畅，无卡顿、无闪烁、无撕裂变形，整体光影、色调统一协调。')
+  sections.push('禁止：肢体畸形、穿模穿插、手脚畸变、人物样貌漂移、五官崩坏、背景残留、场景碎片、模糊噪点、水印文字、多余杂物路人、光影突变、色彩失真。')
+  return sections.join('\n')
+}
+
+const autoPrompt = computed(() => buildPrompt(importConfig.scenario, importConfig.characterCount, importConfig.replaceBackground))
+
+function selectScenario(value: string) {
+  importConfig.scenario = value
+  if (value === 'characters') { importConfig.characterCount = 2; importConfig.replaceBackground = false }
+  else if (value === 'scene') { importConfig.characterCount = 0; importConfig.replaceBackground = true }
+  else if (value === 'both') { importConfig.characterCount = 2; importConfig.replaceBackground = true }
+  else if (value === 'dialogue') { importConfig.characterCount = 1; importConfig.replaceBackground = true }
+  importConfig.promptOverride = buildPrompt(value, importConfig.characterCount, importConfig.replaceBackground)
+}
+
+// 角色数量 / 背景开关变化时同步刷新自动提示词，避免导入到画布的提示词仍是旧配置
+watch(
+  () => [importConfig.characterCount, importConfig.replaceBackground],
+  () => {
+    importConfig.promptOverride = autoPrompt.value
+  }
+)
 
 function onNativeFileSelect(e: any) {
   const file = e.target?.files?.[0]
@@ -288,7 +329,6 @@ function onFileDrop(e: DragEvent) {
 }
 
 const showProcessing = ref(false)
-const genRefreshKey = ref(0)
 const processSteps = ref<Array<{key:string;label:string;active:boolean;done:boolean;percent:number}>>([])
 
 function resetProcess(fbEnabled: boolean) {
@@ -334,13 +374,12 @@ async function handleVideoUpload() {
     // 2. Analyze (progress via socket: video:progress)
     processSteps.value[1].active = true
     const analyzeResult = await videoApi.analyze(projectId.value)
-    hasAudio.value = analyzeResult.data.data?.hasAudio !== false
     processSteps.value[1].done = true
     processSteps.value[1].active = false
 
     // 3. Segment with selected mode
     processSteps.value[2].active = true
-    await videoApi.segment(projectId.value, segmentationMode.value, fixedInterval.value, customRanges.value)
+    await videoApi.segment(projectId.value, segmentationMode.value, customRanges.value)
     processSteps.value[2].done = true
     processSteps.value[2].active = false
 
@@ -411,6 +450,43 @@ async function loadSegments() {
   segments.value = res.data.data || []
 }
 
+const mergingId = ref<number | null>(null)
+const splittingId = ref<number | null>(null)
+const isGenerating = computed(() =>
+  project.value?.status === 'generating' ||
+  segments.value.some(s => s.imageGenState === 'generating' || s.videoGenState === 'generating')
+)
+
+async function mergeSegment(seg: Segment, next: Segment) {
+  if (isGenerating.value) { MessagePlugin.warning('生成进行中，无法合并'); return }
+  mergingId.value = seg.id
+  try {
+    await segmentApi.merge(projectId.value, [seg.id, next.id])
+    MessagePlugin.success('合并成功')
+    await loadSegments()
+    await store.fetchProject(projectId.value)
+  } catch (e: any) {
+    MessagePlugin.error('合并失败: ' + (e?.response?.data?.message || e.message))
+  } finally {
+    mergingId.value = null
+  }
+}
+
+async function splitSegment(seg: Segment) {
+  if (isGenerating.value) { MessagePlugin.warning('生成进行中，无法拆分'); return }
+  splittingId.value = seg.id
+  try {
+    await segmentApi.split(projectId.value, seg.id)
+    MessagePlugin.success('拆分成功')
+    await loadSegments()
+    await store.fetchProject(projectId.value)
+  } catch (e: any) {
+    MessagePlugin.error('拆分失败: ' + (e?.response?.data?.message || e.message))
+  } finally {
+    splittingId.value = null
+  }
+}
+
 function toggleSelect(id: number) {
   const s = new Set(selectedIds.value)
   if (s.has(id)) s.delete(id); else s.add(id)
@@ -443,7 +519,7 @@ async function handleResegment() {
   processSteps.value[2].active = true
 
   try {
-    await videoApi.segment(projectId.value, segmentationMode.value, fixedInterval.value, customRanges.value)
+    await videoApi.segment(projectId.value, segmentationMode.value, customRanges.value)
     processSteps.value[2].done = true
     processSteps.value[2].active = false
 
@@ -468,6 +544,8 @@ async function importSelectedToCanvas() {
     MessagePlugin.warning('请先选择要导入的视频片段')
     return
   }
+  // 初始化提示词预览为当前场景的推荐提示词
+  importConfig.promptOverride = autoPrompt.value
   // 显示配置弹窗
   showImportConfigDialog.value = true
 }
@@ -484,12 +562,14 @@ async function handleImportConfirm() {
     // 为每个选中的片段创建节点和连线，从上到下依次排列
     const CHAR_COL_WIDTH = 220  // 每列宽度
     const CHAR_ROW_HEIGHT = 130 // 每行高度
-    const charsPerCol = Math.max(1, Math.min(importConfig.characterCount, 4)) // 每列最多4个
+    const charsPerCol = Math.max(1, Math.min(importConfig.characterCount || 1, 4)) // 每列最多4个
     const charGridHeight = charsPerCol * CHAR_ROW_HEIGHT  // 角色网格高度
-    const segmentHeight = Math.max(280, charGridHeight + 50)  // 每个片段占高
+    const maxAudioRows = Math.max(0, ...selected.map((s: any) => (s.speechAudios || []).length))
+    const segmentHeight = Math.max(280, charGridHeight + 50) + maxAudioRows * 52  // 每个片段占高（含对话音频行）
     selected.forEach((seg, i) => {
       const label = `片段 ${seg.sortOrder + 1}`
       const videoUrl = getSegmentClipUrl(seg)
+      const audios = seg.speechAudios || []
       const baseY = 100 + i * segmentHeight
       const baseX = 100
 
@@ -558,6 +638,28 @@ async function handleImportConfirm() {
         imageNodeIds.push(bgId)
       }
 
+      // 对话音频节点（按上传顺序，导入后画布自动编号 音频1/2/3）
+      const audioNodeIds: string[] = []
+      audios.forEach((au: any, k: number) => {
+        const audioId = `audio-${Date.now()}-${i}-${k}-${Math.random().toString(36).slice(2, 7)}`
+        nodes.push({
+          id: audioId,
+          type: 'audio',
+          title: `对话音频${k + 1} - ${label}`,
+          position: { x: baseX, y: baseY + 248 + k * 50 },
+          width: 210,
+          height: 44,
+          metadata: {
+            content: `${window.location.origin}/oss/${au.path}`,
+            storageKey: '',
+            status: 'success',
+            mimeType: 'audio/mpeg',
+            durationMs: au.durationMs,
+          },
+        })
+        audioNodeIds.push(audioId)
+      })
+
       // 生成配置节点（所有节点都连向它，因为配置节点里有生成按钮）
       const configId = `config-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`
       // 计算所有图片占用的总列数（角色列 + 可能单独占一列的背景图）
@@ -567,42 +669,12 @@ async function handleImportConfirm() {
       const configX = baseX + 440 + totalImgCols * CHAR_COL_WIDTH + 40
       const configY = baseY + 20
 
-      // 根据配置动态生成提示词
-      // 站位从左到右排列：左一、左二、…C位…右二、右一
-      const charLabels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-      const charList = []
-      const mid = Math.floor(importConfig.characterCount / 2)
-      const numWords = ['一', '二', '三', '四', '五', '六', '七', '八']
-      for (let ci = 0; ci < importConfig.characterCount; ci++) {
-        let pos
-        if (importConfig.characterCount % 2 === 1 && ci === mid) {
-          pos = '中间C位'
-        } else if (ci < mid) {
-          // 左侧：左一、左二…
-          pos = `左侧${numWords[ci]}`
-        } else {
-          // 右侧：右一、右二…（从右往左数）
-          const ri = importConfig.characterCount - 1 - ci
-          pos = `右侧${numWords[ri]}`
-        }
-        charList.push(`${ci + 1}. 原视频${pos}舞者 → 替换为【动漫角色${charLabels[ci]}】`)
+      // 生成提示词：场景预设基础 + 对话音频绑定
+      let prompt = (importConfig.promptOverride || autoPrompt.value).trim()
+      if (audios.length > 0) {
+        const audioLabels = audios.map((_: any, k: number) => `音频${k + 1}`).join('、')
+        prompt += `\n\n本片段包含 ${audios.length} 段对话音频，按说话顺序：${audioLabels}。各音频由对应说话人说出口型与音频严格同步，语气情绪与音频保持一致。`
       }
-      let prompt = `严格参考原版真人舞蹈视频，1:1精准复刻全员舞蹈动作、肢体细节、节拍卡点、走位路线、队形排列，全程队形整齐无偏移，无动作滞后、无动作变形。
-人物精准对位替换：视频内所有真人舞者按原视频固定站位一对一精准替换动漫角色，对位精准不错乱，严格匹配原始站位、队形不变。
-${charList.join('\n')}
-所有替换角色容貌、发型、服饰、妆容全程固定锁定，无任何样貌、穿搭变动。`
-      if (importConfig.replaceBackground) {
-        prompt += `
-场景适配要求：彻底替换全部原始背景场景，空间透视、场地大小、地面纵深与原视频完全匹配，适配全员舞蹈跑动走位。`
-      }
-      prompt += `
-画质整体要求：画面丝滑流畅，无卡顿、无闪烁，高清4K画质，60帧高帧率动态效果，整体画面、光影风格统一协调。
-肢体模型禁止：肢体畸形、穿模穿插、手脚畸变、比例错乱、肢体僵硬抽搐、浮空扭曲。
-舞蹈动作禁止：动作错位、卡点不准、走位混乱、队形偏移、动作滞后、全员动作不同步。
-人物形象禁止：脸型漂移、五官崩坏、面部抖动、容貌、发型、服饰、妆容随机变动。
-场景空间禁止：原背景残留、场景碎片、透视错误、场地变形、地面纵深错乱。
-画面画质禁止：卡顿掉帧、画面撕裂闪烁、模糊噪点、水印文字、多余杂物、多余路人。
-光影色彩禁止：光影割裂、明暗突变、色彩失真、角色大小异常、色调不统一。`
       if (i === 0) firstPromptTemplate = prompt
       nodes.push({
         id: configId,
@@ -634,6 +706,14 @@ ${charList.join('\n')}
           toNodeId: configId,
         })
       })
+      // 每个音频节点 → 配置节点（按说话顺序，顺序即画布编号）
+      audioNodeIds.forEach((aid) => {
+        connections.push({
+          id: `conn-${Date.now()}-${connIndex++}`,
+          fromNodeId: aid,
+          toNodeId: configId,
+        })
+      })
     })
 
     // 通过 import-bridge 导入
@@ -653,9 +733,11 @@ ${charList.join('\n')}
         body: JSON.stringify({
           id: projectId.value,
           workflowConfig: {
+            scenario: importConfig.scenario,
             characterCount: importConfig.characterCount,
             replaceBackground: importConfig.replaceBackground,
             promptTemplate: firstPromptTemplate,
+            promptOverride: importConfig.promptOverride,
           },
         }),
       })
@@ -726,50 +808,53 @@ function getSegmentClipUrl(seg: Segment): string {
   return `${window.location.origin}/oss/project_${projectId.value}/segments/segment_${seg.sortOrder}.mp4?t=${seg.updateTime || Date.now()}`
 }
 
-function getGeneratedVideoUrl(seg: Segment): string {
-  if (seg.videoGenPath) return `${window.location.origin}/oss/${seg.videoGenPath}`
-  return ''
+const audioInputRefs = ref<Record<number, HTMLInputElement | null>>({})
+
+function openAudioPicker(seg: Segment) {
+  audioInputRefs.value[seg.id]?.click()
 }
 
-const genUploadRefs = ref<Record<number, any>>({})
-
-function triggerGenUpload(seg: any) {
-  if (!genUploadRefs.value[seg.id]) genUploadRefs.value[seg.id] = { click: () => {} }
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = 'video/*'
-  input.onchange = (e: any) => handleGenUpload(e, seg)
-  input.click()
-}
-
-function handleGenDrop(e: DragEvent, seg: any) {
-  const file = e.dataTransfer?.files?.[0]
-  if (file?.type.startsWith('video/')) uploadVideoFile(file, seg)
-}
-
-function uploadVideoFile(file: File, seg: any) {
+async function onSpeechAudioChange(seg: Segment, e: any) {
+  const file = e.target?.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  if (!file.type.startsWith('audio/')) { MessagePlugin.warning('请上传音频文件'); return }
   const fd = new FormData()
-  fd.append('video', file)
+  fd.append('audio', file)
   fd.append('projectId', projectId.value.toString())
   fd.append('segmentId', seg.id.toString())
-  fetch('/api/video/uploadGenerated', { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(d => {
-      if (d.success) {
-        MessagePlugin.success('上传成功');
-        genRefreshKey.value++;
-        loadSegments();
-      } else {
-        MessagePlugin.error('上传失败');
-      }
-    })
-    .catch(() => MessagePlugin.error('上传失败'))
+  try {
+    const res = await segmentApi.uploadSpeechAudio(fd)
+    MessagePlugin.success('音频已添加')
+    await loadSegments()
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.message || '上传失败')
+  }
 }
 
-async function handleGenUpload(e: any, seg: any) {
-  const file = e.target?.files?.[0]
-  if (file) uploadVideoFile(file, seg)
-  e.target.value = ''
+function playSpeechAudio(au: any) {
+  const a = new Audio(`${window.location.origin}/oss/${au.path}`)
+  a.play().catch(() => {})
+}
+
+async function removeSpeech(seg: Segment, index: number) {
+  try {
+    await segmentApi.removeSpeechAudio(projectId.value, seg.id, index)
+    MessagePlugin.success('已移除')
+    await loadSegments()
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.message || '移除失败')
+  }
+}
+
+async function reorderSpeech(seg: Segment, from: number, to: number) {
+  if (to < 0 || to >= (seg.speechAudios?.length || 0) || from === to) return
+  try {
+    await segmentApi.reorderSpeechAudio(projectId.value, seg.id, from, to)
+    await loadSegments()
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.message || '排序失败')
+  }
 }
 
 function previewVideo(seg: Segment) {
@@ -798,25 +883,15 @@ function statusTheme(s: string) { const m: Record<string,string>={ draft:'defaul
 function statusLabel(s: string) { const m: Record<string,string>={ draft:'草稿', analyzing:'分析中', ready:'就绪', generating:'生成中', completed:'已完成', failed:'失败' }; return m[s]||s }
 function formatTime(s: number) { const m = Math.floor(s/60), sec = Math.floor(s%60); return `${m}:${sec.toString().padStart(2,'0')}` }
 function formatDuration(s: number) { const m = Math.floor(s/60), sec = Math.floor(s%60); return `${m}分${sec}秒` }
-const modeLabels: Record<string, string> = { auto: '自动检测', scene: '场景切换', dialogue: '对话停顿', hybrid: '混合模式', fixed: '固定时长', custom: '自定义' }
-const modeHints: Record<string, string> = { auto: '基于场景切换检测，每段最长 15 秒', scene: '纯场景切换分段，适合有频繁场景变化的视频（最长 15 秒）', dialogue: '检测人声停顿分段，适合对话/访谈类视频（最长 15 秒）', hybrid: '结合场景切换和对话停顿，适合有多种内容的视频（最长 15 秒）', fixed: '按固定时长切分，适合节奏均匀的视频（最长 15 秒）', custom: '按自定义范围切分' }
-function modeLabel(m: string) { return modeLabels[m] || '自动检测' }
+const modeLabels: Record<string, string> = { shot: '镜头', custom: '自定义' }
+const modeHints: Record<string, string> = { shot: '基于镜头切换检测，每个镜头一段（可手动合并/拆分）', custom: '按自定义范围切分' }
+function modeLabel(m: string) { return modeLabels[m] || '镜头' }
 const modeHint = computed(() => modeHints[segmentationMode.value] || '')
 const modeOptions = computed(() => [
-  { value: 'auto', label: '自动检测（场景+15秒限制）', disabled: false },
-  { value: 'scene', label: '场景切换', disabled: false },
-  { value: 'dialogue', label: `对话停顿${hasAudio.value ? '' : '（无音频）'}`, disabled: !hasAudio.value },
-  { value: 'hybrid', label: `混合模式${hasAudio.value ? '' : '（无音频）'}`, disabled: !hasAudio.value },
-  { value: 'fixed', label: '固定时长', disabled: false },
+  { value: 'shot', label: '镜头', disabled: false },
   { value: 'custom', label: '自定义', disabled: false },
 ])
-function genTheme(s: string) { switch(s) { case 'completed': return 'success'; case 'failed': return 'danger'; case 'generating': return 'warning'; default: return 'default' } }
-function genLabel(s: string) { switch(s) { case 'completed': return '✅完成'; case 'failed': return '❌失败'; case 'generating': return '⏳中'; case 'queued': return '排队'; default: return '待处理' } }
-function progressTheme(msg?: string) { if (!msg) return 'default'; if (msg.includes('失败')) return 'danger'; if (msg.includes('完成')) return 'success'; return 'warning' }
-function genPercent(seg: Segment) { const st = ['queued','generating','completed']; const ii = st.indexOf(seg.imageGenState); const vi = st.indexOf(seg.videoGenState); if (vi===2) return 100; if (ii===2) return 50; if (ii===1) return 25; return 0 }
-function genPercentLabel(seg: Segment) { if (seg.videoGenState==='completed') return '视频完成'; if (seg.imageGenState==='completed') return '图像完成'; if (seg.imageGenState==='generating') return '生成图像...'; return '等待' }
 </script>
-
 <style scoped>
 .project-detail { padding: 24px; max-width: 1200px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
@@ -885,6 +960,54 @@ function genPercentLabel(seg: Segment) { if (seg.videoGenState==='completed') re
   font-size: 10px; padding: 1px 6px; border-radius: 3px; cursor: pointer; z-index: 4; opacity: 0.8;
 }
 .gen-replace:hover { opacity: 1; background: rgba(0,0,0,0.7); }
+
+/* 短段徽标 */
+.short-badge {
+  background: rgba(245,158,11,0.16); color: #D97706; border: 1px solid rgba(245,158,11,0.35);
+  font-size: 10px; line-height: 1; padding: 2px 5px; border-radius: 4px; cursor: help;
+}
+/* 对话音频芯片 */
+.segment-audios { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.audio-chip {
+  display: flex; align-items: center; gap: 6px; font-size: 11px;
+  background: rgba(236,72,153,0.08); border: 1px solid rgba(236,72,153,0.25);
+  border-radius: 8px; padding: 3px 8px; color: var(--td-text-color-primary);
+}
+.audio-num { font-size: 11px; color: var(--td-brand-color); font-weight: 600; }
+.audio-play { color: var(--td-brand-color); cursor: pointer; flex-shrink: 0; }
+.audio-play:hover { transform: scale(1.15); }
+.audio-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td-text-color-primary); }
+.audio-dur { color: var(--td-text-color-placeholder); flex-shrink: 0; }
+.audio-op { cursor: pointer; color: var(--td-text-color-placeholder); padding: 0 1px; font-size: 12px; flex-shrink: 0; }
+.audio-op:hover { color: var(--td-brand-color); }
+.audio-del:hover { color: var(--td-error-color); }
+.segment-audio-add { margin-top: 6px; }
+.audio-add-btn {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  color: var(--td-brand-color); font-size: 12px; padding: 3px 10px;
+  border: 1px dashed var(--td-brand-color); border-radius: 8px; opacity: 0.9; transition: all 0.2s;
+}
+.audio-add-btn:hover { background: var(--td-brand-color-light); opacity: 1; }
+/* 导入配置：场景预设 + 提示词预览 */
+.scenario-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; }
+.scenario-option {
+  border: 1px solid var(--td-border-level-2-color); border-radius: 8px; padding: 8px 10px;
+  cursor: pointer; transition: all 0.2s; background: var(--td-bg-color-container);
+}
+.scenario-option:hover { border-color: var(--td-brand-color); }
+.scenario-option.active { border-color: var(--td-brand-color); background: var(--td-brand-color-light); box-shadow: 0 0 0 1px var(--td-brand-color) inset; }
+.scenario-name { font-weight: 600; font-size: 13px; color: var(--td-text-color-primary); }
+.scenario-desc { font-size: 11px; color: var(--td-text-color-placeholder); margin-top: 2px; line-height: 1.4; }
+.prompt-preview { width: 100%; }
+.prompt-textarea {
+  width: 100%; min-height: 130px; resize: vertical; box-sizing: border-box;
+  border: 1px solid var(--td-border-level-2-color); border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; line-height: 1.6; font-family: inherit; color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+}
+.prompt-textarea:focus { outline: none; border-color: var(--td-brand-color); }
+.prompt-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.prompt-advice { font-size: 11px; color: var(--td-text-color-placeholder); }
 </style>
 .gen-results-section { margin-top: 8px; }
 .gen-upload-area { cursor: pointer; border: 2px dashed var(--td-border-level-2-color); background: var(--td-bg-color-secondary); box-sizing: border-box; }

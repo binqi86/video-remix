@@ -18,7 +18,7 @@ export const projectApi = {
 export const videoApi = {
   upload: (formData: FormData) => api.post('/video/uploadVideo', formData),
   analyze: (projectId: number) => api.post('/video/analyzeVideo', { projectId }),
-  segment: (projectId: number, mode: string = 'auto', fixedInterval?: number, customRanges?: string) => api.post('/video/segmentVideo', { projectId, mode, fixedInterval, customRanges }),
+  segment: (projectId: number, mode: string = 'shot', customRanges?: string) => api.post('/video/segmentVideo', { projectId, mode, customRanges }),
 }
 
 // Segment APIs
@@ -26,6 +26,11 @@ export const segmentApi = {
   list: (projectId: number) => api.get('/segment/getSegments', { params: { projectId } }),
   update: (data: any) => api.put('/segment/updateSegment', data),
   reorder: (id: number, sortOrder: number) => api.put('/segment/reorderSegment', { id, sortOrder }),
+  merge: (projectId: number, ids: number[]) => api.post('/segment/mergeSegments', { projectId, ids }),
+  split: (projectId: number, id: number) => api.post('/segment/splitSegment', { projectId, id }),
+  uploadSpeechAudio: (formData: FormData) => api.post('/segment/uploadSpeechAudio', formData),
+  removeSpeechAudio: (projectId: number, segmentId: number, index: number) => api.post('/segment/removeSpeechAudio', { projectId, segmentId, index }),
+  reorderSpeechAudio: (projectId: number, segmentId: number, from: number, to: number) => api.post('/segment/reorderSpeechAudio', { projectId, segmentId, from, to }),
 }
 
 // Asset APIs

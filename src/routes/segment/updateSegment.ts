@@ -16,7 +16,16 @@ export default async function updateSegment(req: Request, res: Response) {
 
     await db("o_segment").where("id", id).update(updateData);
     const segment = await db("o_segment").where("id", id).first();
-    res.json({ success: true, data: segment });
+    res.json({
+      success: true,
+      data: segment
+        ? {
+            ...segment,
+            splitPoints: segment.splitPoints ? JSON.parse(segment.splitPoints) : null,
+            speechAudios: segment.speechAudios ? JSON.parse(segment.speechAudios) : null,
+          }
+        : null,
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }

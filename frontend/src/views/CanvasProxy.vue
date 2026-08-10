@@ -15,6 +15,7 @@
       <t-loading :loading="true" text="正在连接 Infinite Canvas..." size="large" />
     </div>
     <iframe
+      ref="iframeRef"
       :src="iframeUrl"
       class="canvas-iframe"
       :class="{ loaded: iframeLoaded }"
@@ -32,6 +33,7 @@ import { useRoute, useRouter } from 'vue-router'
 const route = useRoute()
 const router = useRouter()
 const iframeLoaded = ref(false)
+const iframeRef = ref<HTMLIFrameElement | null>(null)
 
 const CANVAS_BASE = 'http://localhost:3000'
 
@@ -83,7 +85,7 @@ function goBack() {
   display: flex;
   align-items: center;
   padding: 4px 12px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   border-bottom: 1px solid var(--td-border-level-1-color);
   gap: 8px;
   flex-shrink: 0;

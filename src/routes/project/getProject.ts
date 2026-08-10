@@ -12,7 +12,17 @@ export default async function getProject(req: Request, res: Response) {
       return res.status(404).json({ success: false, message: "项目不存在" });
     }
     const segments = await db("o_segment").where("projectId", id).orderBy("sortOrder", "asc").all();
-    res.json({ success: true, data: { ...project, segments } });
+    res.json({
+      success: true,
+      data: {
+        ...project,
+        segments: segments.map((s: any) => ({
+          ...s,
+          splitPoints: s.splitPoints ? JSON.parse(s.splitPoints) : null,
+          speechAudios: s.speechAudios ? JSON.parse(s.speechAudios) : null,
+        })),
+      },
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }

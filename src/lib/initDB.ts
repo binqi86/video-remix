@@ -37,6 +37,8 @@ export async function initDB(): Promise<void> {
       videoGenState TEXT DEFAULT 'pending',
       videoGenPath TEXT,
       errorReason TEXT,
+      splitPoints TEXT,
+      speechAudios TEXT,
       createTime INTEGER NOT NULL,
       updateTime INTEGER,
       FOREIGN KEY (projectId) REFERENCES o_project(id) ON DELETE CASCADE
@@ -131,6 +133,28 @@ export async function initDB(): Promise<void> {
     const hasWorkflowConfig = columns.some((c: any) => c.name === "workflowConfig");
     if (!hasWorkflowConfig) {
       exec("ALTER TABLE o_project ADD COLUMN workflowConfig TEXT DEFAULT '{}'");
+    }
+  } catch {
+    // Migration already applied or table doesn't exist yet
+  }
+
+  // Migration: add splitPoints column to o_segment if missing
+  try {
+    const segColumns = queryAll("PRAGMA table_info(o_segment)");
+    const hasSplitPoints = segColumns.some((c: any) => c.name === "splitPoints");
+    if (!hasSplitPoints) {
+      exec("ALTER TABLE o_segment ADD COLUMN splitPoints TEXT");
+    }
+  } catch {
+    // Migration already applied or table doesn't exist yet
+  }
+
+  // Migration: add speechAudios column to o_segment if missing
+  try {
+    const segColumns2 = queryAll("PRAGMA table_info(o_segment)");
+    const hasSpeechAudios = segColumns2.some((c: any) => c.name === "speechAudios");
+    if (!hasSpeechAudios) {
+      exec("ALTER TABLE o_segment ADD COLUMN speechAudios TEXT");
     }
   } catch {
     // Migration already applied or table doesn't exist yet

@@ -33,6 +33,8 @@ export interface Segment {
   videoGenState: string
   videoGenPath: string | null
   errorReason: string | null
+  splitPoints?: number[] | null
+  speechAudios?: { fileName: string; path: string; durationMs: number }[] | null
 }
 
 export const useProjectStore = defineStore('project', () => {

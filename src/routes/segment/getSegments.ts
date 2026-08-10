@@ -11,7 +11,14 @@ export default async function getSegments(req: Request, res: Response) {
       .where("projectId", projectId)
       .orderBy("sortOrder", "asc")
       .all();
-    res.json({ success: true, data: segments });
+    res.json({
+      success: true,
+      data: segments.map((s: any) => ({
+        ...s,
+        splitPoints: s.splitPoints ? JSON.parse(s.splitPoints) : null,
+        speechAudios: s.speechAudios ? JSON.parse(s.speechAudios) : null,
+      })),
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
