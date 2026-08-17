@@ -273,18 +273,42 @@ const scenarioOptions = [
   { value: 'dialogue', label: '对话替换', desc: '同步对话音频与口型' },
 ]
 
+// 按人数生成从左到右的站位描述，作为提示词里"哪个位置的人"的锚点。
+// 奇数有 C 位；数量多时从中央向两侧镜像编号（左1 左2 … 右2 右1）。
+function buildPersonPositions(count: number): string[] {
+  if (count <= 0) return []
+  if (count === 1) return ['画面中央的人物']
+  if (count === 2) return ['画面左侧的人物', '画面右侧的人物']
+  const labels: string[] = []
+  const k = Math.floor(count / 2)
+  for (let i = 0; i < count; i++) {
+    if (count % 2 === 1 && i === k) {
+      labels.push('画面中央的人物')
+      continue
+    }
+    if (i < k) {
+      const n = i + 1
+      labels.push(n === 1 ? '画面最左侧的人物' : `画面左起第${n}位的人物`)
+    } else {
+      const n = count - i
+      labels.push(n === 1 ? '画面最右侧的人物' : `画面右起第${n}位的人物`)
+    }
+  }
+  return labels
+}
+
 function buildPrompt(scenario: string, characterCount: number, replaceBackground: boolean): string {
   const sections: string[] = []
   if (scenario === 'scene') {
     sections.push('保持原视频的人物、动作、运镜、构图不变，不做人物替换。')
   } else {
-    const charList: string[] = []
-    for (let ci = 0; ci < characterCount; ci++) {
-      charList.push(`人物${ci + 1} → 替换为【在此 @ 引用角色${ci + 1}图片】`)
+    const positions = buildPersonPositions(characterCount)
+    if (positions.length > 0) {
+      const charList = positions.map((pos, ci) => `${pos} → 替换为【在此 @ 引用角色${ci + 1}图片】`)
+      sections.push('将【在此 @ 引用原视频】画面中的人物按下述站位替换为对应角色，动作、运镜、画面构图保持原样不变：')
+      sections.push(charList.join('\n'))
+      sections.push('所有替换角色容貌、发型、服饰、妆容全程保持稳定一致，不漂移、不变形。')
     }
-    sections.push('将【在此 @ 引用原视频】画面中的人物按站位顺序替换为指定角色，动作、运镜、画面构图保持原样不变：')
-    sections.push(charList.join('\n'))
-    sections.push('所有替换角色容貌、发型、服饰、妆容全程保持稳定一致，不漂移、不变形。')
   }
   if (replaceBackground) {
     sections.push('将画面背景替换为指定场景，空间透视、光线方向、地面纵深与参考图一致，人物与动作保持不变：')
@@ -558,6 +582,7 @@ async function handleImportConfirm() {
     const connections: any[] = []
     let connIndex = 0
     let firstPromptTemplate = ''
+    const charPositions = buildPersonPositions(importConfig.characterCount)
 
     // 为每个选中的片段创建节点和连线，从上到下依次排列
     const CHAR_COL_WIDTH = 220  // 每列宽度
@@ -597,10 +622,11 @@ async function handleImportConfirm() {
         const charId = `char-${Date.now()}-${i}-${ci}-${Math.random().toString(36).slice(2, 7)}`
         const col = Math.floor(ci / charsPerCol)
         const row = ci % charsPerCol
+        const pos = charPositions[ci] || ''
         nodes.push({
           id: charId,
           type: 'image',
-          title: `角色${ci + 1} - ${label}`,
+          title: `角色${ci + 1}（${pos}）- ${label}`,
           position: { x: baseX + 440 + col * CHAR_COL_WIDTH, y: baseY + row * CHAR_ROW_HEIGHT },
           width: 200,
           height: 110,
@@ -609,7 +635,7 @@ async function handleImportConfirm() {
             storageKey: '',
             status: 'empty',
             mimeType: 'image/png',
-            prompt: `角色${ci + 1}占位 - 请替换为角色图片`,
+            prompt: `角色${ci + 1}占位（${pos}）- 请替换为角色图片`,
           },
         })
         imageNodeIds.push(charId)

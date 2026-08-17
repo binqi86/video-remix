@@ -25,12 +25,21 @@ async function ensureDb(): Promise<SqlJsDatabase> {
   return _db;
 }
 
+// Atomically persist the in-memory database: write to a temp file, then rename.
+// A rename is atomic on the same filesystem, so a crash mid-write can never leave
+// a truncated/corrupt db.sqlite behind (the old file stays intact until the swap).
+function persistDb(): void {
+  if (!_db) return;
+  const buf = Buffer.from(_db.export());
+  const tmpPath = `${DB_PATH}.tmp`;
+  fs.writeFileSync(tmpPath, buf);
+  fs.renameSync(tmpPath, DB_PATH);
+}
+
 function scheduleSave(): void {
   if (saveTimer) clearTimeout(saveTimer);
   // Write immediately instead of debouncing, so data survives process kills
-  if (_db) {
-    fs.writeFileSync(DB_PATH, Buffer.from(_db.export()));
-  }
+  persistDb();
 }
 
 // ------- Public API -------
@@ -76,7 +85,7 @@ export function exec(sql: string, params?: any[]): void {
 export function closeDb(): Promise<void> {
   if (saveTimer) clearTimeout(saveTimer);
   if (_db) {
-    fs.writeFileSync(DB_PATH, Buffer.from(_db.export()));
+    persistDb();
     _db.close();
     _db = null;
   }
@@ -85,9 +94,7 @@ export function closeDb(): Promise<void> {
 
 /** Immediately flush the in-memory database to disk. Call this after critical writes. */
 export function syncSave(): void {
-  if (_db) {
-    fs.writeFileSync(DB_PATH, Buffer.from(_db.export()));
-  }
+  persistDb();
 }
 
 // ------- QueryBuilder (knex-like chainable API) -------

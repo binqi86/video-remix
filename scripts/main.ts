@@ -187,12 +187,29 @@ function createMainWindow(port: number): Promise<void> {
   });
 }
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "videoremix",
-    privileges: { secure: true, supportFetchAPI: true, corsEnabled: true },
-  },
-]);
+// Single-instance lock: macOS keeps the app alive when the window is closed, so
+// without this the user can accidentally end up with two backends writing the
+// same db.sqlite — each full-file write from one process clobbers the other's data.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+  runMain();
+}
+
+function runMain() {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: "videoremix",
+      privileges: { secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
+  ]);
 
 app.whenReady().then(async () => {
   try {
@@ -241,9 +258,9 @@ app.whenReady().then(async () => {
           mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize();
           return { ok: true };
         },
-        windowclose: () => { app.exit(0); return { ok: true }; },
+        windowclose: () => { app.quit(); return { ok: true }; },
         apprestart: () => {
-          setTimeout(() => { app.relaunch(); app.exit(0); }, 500);
+          setTimeout(() => { app.relaunch(); app.quit(); }, 500);
           return { ok: true, message: "重启中" };
         },
         windowismaximized: () => ({ maximized: mainWindow?.isMaximized() ?? false }),
@@ -283,3 +300,4 @@ app.on("before-quit", async () => {
   }
   await closeBackend().catch(() => {});
 });
+}
