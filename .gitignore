@@ -18,3 +18,4 @@ src/data/suppliers.json
 *.sqlite-wal
 *.sqlite-shm
 src/data/_bak/
+.workbuddy/memory/2026-09-13.md
